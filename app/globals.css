@@ -1,0 +1,69 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg: #0f0f11;
+  --surface: #18181c;
+  --surface2: #202026;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --text: #e8e8ec;
+  --text2: #888894;
+  --text3: #55555f;
+  --purple: #7c6ef7;
+  --purple-dim: rgba(124,110,247,0.15);
+  --purple-bg: rgba(124,110,247,0.08);
+  --teal: #3ecfae;
+  --teal-dim: rgba(62,207,174,0.12);
+  --amber: #f5a623;
+  --amber-dim: rgba(245,166,35,0.12);
+  --blue: #4fa3e0;
+  --blue-dim: rgba(79,163,224,0.12);
+  --pink: #e06b9a;
+  --pink-dim: rgba(224,107,154,0.12);
+  --red: #e05555;
+  --green: #3ecfae;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+input[type=range] {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  background: var(--border2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type=range]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--purple);
+  cursor: pointer;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s infinite;
+}
