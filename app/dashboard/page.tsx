@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useSession, signOut } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 import { CheckSection } from '@/types'
 import { DEFAULT_SECTIONS } from '@/lib/defaultChecklist'
 import Sidebar from '@/components/Sidebar'
@@ -20,12 +21,31 @@ function deepClone<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj))
 }
 
+function calcStats(sections: CheckSection[]) {
+  const allItems = sections.flatMap(s => s.cards.flatMap(c => c.items))
+  const total = allItems.length
+  const done = allItems.filter(i => i.done).length
+  const totalPct = total ? Math.round((done / total) * 100) : 0
+
+  const sectionPcts: Record<string, number> = {}
+  for (const s of sections) {
+    const items = s.cards.flatMap(c => c.items)
+    sectionPcts[s.name] = items.length
+      ? Math.round(items.filter(i => i.done).length / items.length * 100)
+      : 0
+  }
+
+  const incompleteItems = allItems.filter(i => !i.done).map(i => i.name)
+  return { totalPct, sectionPcts, incompleteItems }
+}
+
 export default function DashboardPage() {
   const { data: session } = useSession()
+  const router = useRouter()
   const [sections, setSections] = useState<CheckSection[]>(() => deepClone(DEFAULT_SECTIONS))
   const [toast, setToast] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  // 로컬스토리지 로드 + 자정 리셋
   useEffect(() => {
     const savedDate = localStorage.getItem(DATE_KEY)
     const today = todayKey()
@@ -38,22 +58,40 @@ export default function DashboardPage() {
     }
   }, [])
 
-  // 자정 리셋 타이머
   useEffect(() => {
     const now = new Date()
     const midnight = new Date(now)
     midnight.setHours(24, 0, 0, 0)
     const ms = midnight.getTime() - now.getTime()
     const t = setTimeout(() => {
+      saveToCloud(true)
       handleReset(true)
     }, ms)
     return () => clearTimeout(t)
-  }, [])
+  }, [sections])
 
-  const save = useCallback((newSections: CheckSection[]) => {
+  const saveLocal = useCallback((newSections: CheckSection[]) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newSections))
     localStorage.setItem(DATE_KEY, todayKey())
   }, [])
+
+  async function saveToCloud(auto = false) {
+    if (!session?.user) return
+    const { totalPct, sectionPcts, incompleteItems } = calcStats(sections)
+    setSaving(true)
+    try {
+      await fetch('/api/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: todayKey(), totalPct, sectionPcts, incompleteItems }),
+      })
+      if (!auto) showToast(`✅ 기록 저장 완료! 달성률 ${totalPct}%`)
+    } catch {
+      if (!auto) showToast('저장 실패. 다시 시도해주세요.')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const handleToggle = useCallback((itemId: string) => {
     setSections(prev => {
@@ -64,10 +102,10 @@ export default function DashboardPage() {
           if (item) { item.done = !item.done; break }
         }
       }
-      save(next)
+      saveLocal(next)
       return next
     })
-  }, [save])
+  }, [saveLocal])
 
   const handleReset = useCallback((auto = false) => {
     if (!auto && !confirm('체크를 모두 초기화할까요?')) return
@@ -87,28 +125,44 @@ export default function DashboardPage() {
       <Sidebar sections={sections} onReset={() => handleReset(false)} />
 
       <main className="flex-1 px-10 py-8 max-w-3xl">
-        {/* 상단 유저 정보 */}
+        {/* 상단 */}
         <div className="flex justify-between items-center mb-6">
           <div className="text-sm" style={{ color: 'var(--text2)' }}>
             안녕하세요, <span style={{ color: 'var(--text)' }}>{session?.user?.name}</span>님
           </div>
-          <button
-            onClick={() => signOut({ callbackUrl: '/' })}
-            className="text-xs px-3 py-1.5 rounded-md transition-all cursor-pointer"
-            style={{ border: '1px solid var(--border2)', color: 'var(--text3)', background: 'none' }}
-            onMouseOver={e => e.currentTarget.style.color = 'var(--text2)'}
-            onMouseOut={e => e.currentTarget.style.color = 'var(--text3)'}
-          >
-            로그아웃
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => router.push('/import')}
+              className="text-xs px-3 py-1.5 rounded-md cursor-pointer transition-all"
+              style={{ border: '1px solid var(--border2)', color: 'var(--text3)', background: 'none' }}
+              onMouseOver={e => e.currentTarget.style.color = 'var(--purple)'}
+              onMouseOut={e => e.currentTarget.style.color = 'var(--text3)'}
+            >
+              🤖 AI 임포트
+            </button>
+            <button
+              onClick={() => router.push('/analytics')}
+              className="text-xs px-3 py-1.5 rounded-md cursor-pointer transition-all"
+              style={{ border: '1px solid var(--border2)', color: 'var(--text3)', background: 'none' }}
+              onMouseOver={e => e.currentTarget.style.color = 'var(--teal)'}
+              onMouseOut={e => e.currentTarget.style.color = 'var(--text3)'}
+            >
+              📊 분석
+            </button>
+            <button
+              onClick={() => signOut({ callbackUrl: '/' })}
+              className="text-xs px-3 py-1.5 rounded-md cursor-pointer"
+              style={{ border: '1px solid var(--border2)', color: 'var(--text3)', background: 'none' }}
+            >
+              로그아웃
+            </button>
+          </div>
         </div>
 
         <TimeScrub />
 
-        {/* 섹션별 체크리스트 */}
         {sections.map(section => (
           <div key={section.id}>
-            {/* 섹션 헤더 */}
             <div className="flex items-center gap-2.5 mt-7 mb-3">
               <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: section.color }} />
               <div className="text-[11px] font-semibold tracking-[0.08em] uppercase" style={{ color: 'var(--text3)' }}>
@@ -116,41 +170,35 @@ export default function DashboardPage() {
               </div>
               <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
             </div>
-
             {section.cards.map(card => (
-              <CheckCard
-                key={card.id}
-                card={card}
-                sectionColor={section.color}
-                onToggle={handleToggle}
-              />
+              <CheckCard key={card.id} card={card} sectionColor={section.color} onToggle={handleToggle} />
             ))}
           </div>
         ))}
 
-        {/* 하단 버튼 */}
+        {/* 하단 저장 버튼 */}
         <div className="flex gap-2.5 mt-8 pt-6 border-t" style={{ borderColor: 'var(--border)' }}>
           <button
-            className="flex items-center gap-1.5 px-5 py-2.5 rounded-md text-[13px] font-medium transition-all cursor-pointer"
+            onClick={() => saveToCloud(false)}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-5 py-2.5 rounded-md text-[13px] font-medium cursor-pointer disabled:opacity-50 transition-all"
             style={{ background: 'var(--purple)', border: 'none', color: '#fff' }}
-            onMouseOver={e => e.currentTarget.style.background = '#6a5ee0'}
-            onMouseOut={e => e.currentTarget.style.background = 'var(--purple)'}
-            onClick={() => showToast('Notion 연동은 /setup 에서 설정하세요.')}
+            onMouseOver={e => !saving && (e.currentTarget.style.background = '#6a5ee0')}
+            onMouseOut={e => (e.currentTarget.style.background = 'var(--purple)')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
             </svg>
-            Notion에 저장
+            {saving ? '저장 중...' : '오늘 기록 저장'}
           </button>
         </div>
       </main>
 
-      {/* 토스트 */}
       {toast && (
         <div
-          className="fixed bottom-7 right-7 px-4 py-2.5 rounded-md text-[13px] z-50"
+          className="fixed bottom-7 right-7 px-4 py-2.5 rounded-md text-[13px] z-50 transition-all"
           style={{ background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)' }}
         >
           {toast}

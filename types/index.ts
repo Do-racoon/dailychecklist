@@ -29,9 +29,12 @@ export interface UserSettings {
 }
 
 export interface DailyRecord {
+  id?: string
+  userId?: string
   date: string
   totalPct: number
   sectionPcts: Record<string, number>
   incompleteItems: string[]
   memo?: string
+  savedAt?: string
 }
