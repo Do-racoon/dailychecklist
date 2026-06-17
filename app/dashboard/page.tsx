@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { CheckSection } from '@/types'
@@ -11,6 +11,7 @@ import CheckCard from '@/components/CheckCard'
 
 const STORAGE_KEY = 'daily_checklist_v2'
 const DATE_KEY = 'daily_checklist_date'
+const ONBOARDED_KEY = 'daily_checklist_onboarded'
 
 function todayKey() {
   const d = new Date()
@@ -26,7 +27,6 @@ function calcStats(sections: CheckSection[]) {
   const total = allItems.length
   const done = allItems.filter(i => i.done).length
   const totalPct = total ? Math.round((done / total) * 100) : 0
-
   const sectionPcts: Record<string, number> = {}
   for (const s of sections) {
     const items = s.cards.flatMap(c => c.items)
@@ -34,18 +34,28 @@ function calcStats(sections: CheckSection[]) {
       ? Math.round(items.filter(i => i.done).length / items.length * 100)
       : 0
   }
-
   const incompleteItems = allItems.filter(i => !i.done).map(i => i.name)
   return { totalPct, sectionPcts, incompleteItems }
 }
 
 export default function DashboardPage() {
-  const { data: session } = useSession()
+  const { data: session, status } = useSession()
   const router = useRouter()
   const [sections, setSections] = useState<CheckSection[]>(() => deepClone(DEFAULT_SECTIONS))
   const [toast, setToast] = useState('')
   const [saving, setSaving] = useState(false)
+  const sectionsRef = useRef(sections)
 
+  // 첫 로그인 온보딩 체크
+  useEffect(() => {
+    if (status !== 'authenticated') return
+    const onboarded = localStorage.getItem(ONBOARDED_KEY)
+    if (!onboarded) {
+      router.push('/import?onboarding=1')
+    }
+  }, [status, router])
+
+  // 로컬스토리지 로드
   useEffect(() => {
     const savedDate = localStorage.getItem(DATE_KEY)
     const today = todayKey()
@@ -58,26 +68,32 @@ export default function DashboardPage() {
     }
   }, [])
 
+  // sectionsRef 동기화 (자정 타이머에서 최신값 접근)
+  useEffect(() => {
+    sectionsRef.current = sections
+  }, [sections])
+
+  // 자정 자동 저장 + 리셋
   useEffect(() => {
     const now = new Date()
     const midnight = new Date(now)
     midnight.setHours(24, 0, 0, 0)
     const ms = midnight.getTime() - now.getTime()
-    const t = setTimeout(() => {
-      saveToCloud(true)
-      handleReset(true)
+    const t = setTimeout(async () => {
+      await saveToCloud(sectionsRef.current, true)
+      resetChecklist(true)
     }, ms)
     return () => clearTimeout(t)
-  }, [sections])
+  }, [])
 
   const saveLocal = useCallback((newSections: CheckSection[]) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newSections))
     localStorage.setItem(DATE_KEY, todayKey())
   }, [])
 
-  async function saveToCloud(auto = false) {
+  async function saveToCloud(currentSections: CheckSection[], auto = false) {
     if (!session?.user) return
-    const { totalPct, sectionPcts, incompleteItems } = calcStats(sections)
+    const { totalPct, sectionPcts, incompleteItems } = calcStats(currentSections)
     setSaving(true)
     try {
       await fetch('/api/records', {
@@ -85,12 +101,29 @@ export default function DashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: todayKey(), totalPct, sectionPcts, incompleteItems }),
       })
-      if (!auto) showToast(`✅ 기록 저장 완료! 달성률 ${totalPct}%`)
+      if (!auto) {
+        showToast(`✅ 저장 완료! 오늘 달성률 ${totalPct}%`)
+        // 저장 후 리셋
+        setTimeout(() => resetChecklist(true), 1500)
+      }
     } catch {
       if (!auto) showToast('저장 실패. 다시 시도해주세요.')
     } finally {
       setSaving(false)
     }
+  }
+
+  function resetChecklist(auto = false) {
+    const fresh = deepClone(DEFAULT_SECTIONS)
+    // 커스텀 섹션이 있으면 유지 (done만 초기화)
+    const customSections = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') as CheckSection[] | null
+    const resetSections = customSections
+      ? customSections.map(s => ({ ...s, cards: s.cards.map(c => ({ ...c, items: c.items.map(i => ({ ...i, done: false })) })) }))
+      : fresh
+    setSections(resetSections)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(resetSections))
+    localStorage.setItem(DATE_KEY, todayKey())
+    if (auto) showToast('🌅 새로운 하루! 체크리스트가 초기화됐어요.')
   }
 
   const handleToggle = useCallback((itemId: string) => {
@@ -107,13 +140,11 @@ export default function DashboardPage() {
     })
   }, [saveLocal])
 
-  const handleReset = useCallback((auto = false) => {
-    if (!auto && !confirm('체크를 모두 초기화할까요?')) return
-    const fresh = deepClone(DEFAULT_SECTIONS)
-    setSections(fresh)
-    localStorage.removeItem(STORAGE_KEY)
-    showToast(auto ? '🌅 새로운 하루! 체크리스트가 초기화됐어요.' : '초기화됐어요.')
-  }, [])
+  function handleManualReset() {
+    if (!confirm('체크를 모두 초기화할까요?')) return
+    resetChecklist(false)
+    showToast('초기화됐어요.')
+  }
 
   function showToast(msg: string) {
     setToast(msg)
@@ -122,7 +153,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar sections={sections} onReset={() => handleReset(false)} />
+      <Sidebar sections={sections} onReset={handleManualReset} />
 
       <main className="flex-1 px-10 py-8 max-w-3xl">
         {/* 상단 */}
@@ -147,7 +178,7 @@ export default function DashboardPage() {
               onMouseOver={e => e.currentTarget.style.color = 'var(--teal)'}
               onMouseOut={e => e.currentTarget.style.color = 'var(--text3)'}
             >
-              📊 분석
+              📊 기록
             </button>
             <button
               onClick={() => signOut({ callbackUrl: '/' })}
@@ -176,10 +207,9 @@ export default function DashboardPage() {
           </div>
         ))}
 
-        {/* 하단 저장 버튼 */}
         <div className="flex gap-2.5 mt-8 pt-6 border-t" style={{ borderColor: 'var(--border)' }}>
           <button
-            onClick={() => saveToCloud(false)}
+            onClick={() => saveToCloud(sections, false)}
             disabled={saving}
             className="flex items-center gap-1.5 px-5 py-2.5 rounded-md text-[13px] font-medium cursor-pointer disabled:opacity-50 transition-all"
             style={{ background: 'var(--purple)', border: 'none', color: '#fff' }}
@@ -193,12 +223,15 @@ export default function DashboardPage() {
             </svg>
             {saving ? '저장 중...' : '오늘 기록 저장'}
           </button>
+          <div className="text-[11px] flex items-center" style={{ color: 'var(--text3)' }}>
+            저장하면 체크가 초기화돼요
+          </div>
         </div>
       </main>
 
       {toast && (
         <div
-          className="fixed bottom-7 right-7 px-4 py-2.5 rounded-md text-[13px] z-50 transition-all"
+          className="fixed bottom-7 right-7 px-4 py-2.5 rounded-md text-[13px] z-50"
           style={{ background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)' }}
         >
           {toast}
