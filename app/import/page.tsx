@@ -69,7 +69,7 @@ function ImportContent() {
         </header>
       )}
 
-      <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className="max-w-3xl mx-auto px-4 md:px-8 py-6">
 
         {/* 헤더 */}
         {isOnboarding ? (

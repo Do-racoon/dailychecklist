@@ -105,7 +105,7 @@ export default function AnalyticsPage() {
     <div className="min-h-screen w-full" style={{ background: 'var(--bg)', paddingBottom: 'calc(var(--nav-h) + 24px)' }}>
 
       {/* 헤더 */}
-      <header className="sticky top-0 z-30 flex items-center justify-between px-4 py-4"
+      <header className="sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 py-4"
         style={{ background: 'rgba(15,15,17,0.95)', backdropFilter: 'blur(16px)', borderBottom: '1px solid var(--border)' }}>
         <div className="text-base font-semibold" style={{ color: 'var(--text)' }}>📊 기록 & 분석</div>
         <div className="font-mono text-xs" style={{ color: 'var(--text3)' }}>
@@ -113,7 +113,7 @@ export default function AnalyticsPage() {
         </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-4 py-5">
+      <div className="max-w-3xl mx-auto px-4 md:px-8 py-6">
 
         {/* ① 지금 나는 어디쯤? — 핵심 카드 */}
         <div
