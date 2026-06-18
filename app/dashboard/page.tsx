@@ -5,9 +5,9 @@ import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { CheckSection } from '@/types'
 import { DEFAULT_SECTIONS } from '@/lib/defaultChecklist'
-import Sidebar from '@/components/Sidebar'
 import TimeScrub from '@/components/TimeScrub'
 import CheckCard from '@/components/CheckCard'
+import BottomNav from '@/components/BottomNav'
 
 const STORAGE_KEY = 'daily_checklist_v2'
 const DATE_KEY = 'daily_checklist_date'
@@ -18,25 +18,22 @@ function todayKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function deepClone<T>(obj: T): T {
-  return JSON.parse(JSON.stringify(obj))
-}
+function deepClone<T>(v: T): T { return JSON.parse(JSON.stringify(v)) }
 
 function calcStats(sections: CheckSection[]) {
-  const allItems = sections.flatMap(s => s.cards.flatMap(c => c.items))
-  const total = allItems.length
-  const done = allItems.filter(i => i.done).length
+  const all = sections.flatMap(s => s.cards.flatMap(c => c.items))
+  const done = all.filter(i => i.done).length
+  const total = all.length
   const totalPct = total ? Math.round((done / total) * 100) : 0
   const sectionPcts: Record<string, number> = {}
   for (const s of sections) {
     const items = s.cards.flatMap(c => c.items)
-    sectionPcts[s.name] = items.length
-      ? Math.round(items.filter(i => i.done).length / items.length * 100)
-      : 0
+    sectionPcts[s.name] = items.length ? Math.round(items.filter(i => i.done).length / items.length * 100) : 0
   }
-  const incompleteItems = allItems.filter(i => !i.done).map(i => i.name)
-  return { totalPct, sectionPcts, incompleteItems }
+  return { totalPct, sectionPcts, done, total, incompleteItems: all.filter(i => !i.done).map(i => i.name) }
 }
+
+const DAYS = ['일', '월', '화', '수', '목', '금', '토']
 
 export default function DashboardPage() {
   const { data: session, status } = useSession()
@@ -44,13 +41,17 @@ export default function DashboardPage() {
   const [sections, setSections] = useState<CheckSection[]>(() => deepClone(DEFAULT_SECTIONS))
   const [toast, setToast] = useState('')
   const [saving, setSaving] = useState(false)
+  const [dateStr, setDateStr] = useState('')
   const sectionsRef = useRef(sections)
 
   useEffect(() => {
+    const d = new Date()
+    setDateStr(`${d.getMonth() + 1}월 ${d.getDate()}일 ${DAYS[d.getDay()]}요일`)
+  }, [])
+
+  useEffect(() => {
     if (status !== 'authenticated') return
-    if (!localStorage.getItem(ONBOARDED_KEY)) {
-      router.push('/import?onboarding=1')
-    }
+    if (!localStorage.getItem(ONBOARDED_KEY)) router.push('/import?onboarding=1')
   }, [status, router])
 
   useEffect(() => {
@@ -69,11 +70,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const now = new Date()
-    const midnight = new Date(now)
-    midnight.setHours(24, 0, 0, 0)
+    const midnight = new Date(now); midnight.setHours(24, 0, 0, 0)
     const t = setTimeout(async () => {
-      await saveToCloud(sectionsRef.current, true)
-      resetChecklist(true)
+      await doSave(sectionsRef.current, true)
+      doReset(true)
     }, midnight.getTime() - now.getTime())
     return () => clearTimeout(t)
   }, [])
@@ -83,7 +83,7 @@ export default function DashboardPage() {
     localStorage.setItem(DATE_KEY, todayKey())
   }, [])
 
-  async function saveToCloud(cur: CheckSection[], auto = false) {
+  async function doSave(cur: CheckSection[], auto = false) {
     if (!session?.user) return
     const stats = calcStats(cur)
     setSaving(true)
@@ -91,20 +91,18 @@ export default function DashboardPage() {
       await fetch('/api/records', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: todayKey(), ...stats }),
+        body: JSON.stringify({ date: todayKey(), totalPct: stats.totalPct, sectionPcts: stats.sectionPcts, incompleteItems: stats.incompleteItems }),
       })
       if (!auto) {
-        showToast(`✅ 저장 완료! 오늘 달성률 ${stats.totalPct}%`)
-        setTimeout(() => resetChecklist(true), 1500)
+        showToast(`✅ 저장 완료! 달성률 ${stats.totalPct}%`)
+        setTimeout(() => doReset(true), 1500)
       }
     } catch {
       if (!auto) showToast('저장 실패. 다시 시도해주세요.')
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }
 
-  function resetChecklist(auto = false) {
+  function doReset(silent = false) {
     const cur = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') as CheckSection[] | null
     const fresh = cur
       ? cur.map(s => ({ ...s, cards: s.cards.map(c => ({ ...c, items: c.items.map(i => ({ ...i, done: false })) })) }))
@@ -112,14 +110,15 @@ export default function DashboardPage() {
     setSections(fresh)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh))
     localStorage.setItem(DATE_KEY, todayKey())
-    if (auto) showToast('🌅 새로운 하루! 체크리스트가 초기화됐어요.')
+    if (!silent) showToast('초기화됐어요.')
+    else showToast('🌅 새로운 하루! 초기화됐어요.')
   }
 
-  const handleToggle = useCallback((itemId: string) => {
+  const handleToggle = useCallback((id: string) => {
     setSections(prev => {
       const next = deepClone(prev)
       for (const s of next) for (const c of s.cards) {
-        const item = c.items.find(i => i.id === itemId)
+        const item = c.items.find(i => i.id === id)
         if (item) { item.done = !item.done; break }
       }
       saveLocal(next)
@@ -127,66 +126,75 @@ export default function DashboardPage() {
     })
   }, [saveLocal])
 
-  function showToast(msg: string) {
-    setToast(msg)
-    setTimeout(() => setToast(''), 3000)
-  }
+  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3000) }
 
-  const { totalPct, incompleteItems } = calcStats(sections)
-  const allItems = sections.flatMap(s => s.cards.flatMap(c => c.items))
-  const doneCount = allItems.filter(i => i.done).length
+  const { totalPct, done, total } = calcStats(sections)
+  const circ = 2 * Math.PI * 20
+  const offset = circ - (circ * totalPct) / 100
 
   return (
-    <div className="flex min-h-screen" style={{ paddingBottom: 80 }}>
-      <Sidebar sections={sections} onReset={() => { if (confirm('체크를 모두 초기화할까요?')) { resetChecklist(false); showToast('초기화됐어요.') } }} />
+    <div className="flex flex-col w-full min-h-screen" style={{ paddingBottom: 'calc(var(--nav-h) + var(--bar-h))' }}>
 
-      <main className="flex-1 px-8 py-6 max-w-3xl">
-
-        {/* 상단 네비게이션 */}
-        <div className="flex justify-between items-center mb-5">
-          <div className="text-sm" style={{ color: 'var(--text2)' }}>
-            {session?.user?.name}님의 오늘
+      {/* ── 상단 헤더 ── */}
+      <header
+        className="sticky top-0 z-30 w-full"
+        style={{ background: 'rgba(15,15,17,0.95)', backdropFilter: 'blur(16px)', borderBottom: '1px solid var(--border)' }}
+      >
+        <div className="flex items-center justify-between px-4 py-3">
+          {/* 날짜 */}
+          <div>
+            <div className="text-xs" style={{ color: 'var(--text3)' }}>{session?.user?.name}</div>
+            <div className="text-base font-semibold" style={{ color: 'var(--text)', fontFamily: 'Noto Sans KR, sans-serif' }}>{dateStr}</div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* AI 임포트 */}
-            <button
-              onClick={() => router.push('/import')}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all"
-              style={{ background: 'var(--purple-dim)', border: '1px solid var(--purple)', color: 'var(--purple)' }}
-              onMouseOver={e => e.currentTarget.style.background = 'var(--purple-bg)'}
-              onMouseOut={e => e.currentTarget.style.background = 'var(--purple-dim)'}
-            >
-              <span>🤖</span> AI 임포트
-            </button>
-            {/* 기록 */}
-            <button
-              onClick={() => router.push('/analytics')}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all"
-              style={{ background: 'var(--surface)', border: '1px solid var(--border2)', color: 'var(--text2)' }}
-              onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--teal)'; e.currentTarget.style.color = 'var(--teal)' }}
-              onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.color = 'var(--text2)' }}
-            >
-              <span>📊</span> 기록
-            </button>
-            <button
-              onClick={() => signOut({ callbackUrl: '/' })}
-              className="px-3 py-2 rounded-lg text-sm cursor-pointer"
-              style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text3)' }}
-            >
+
+          {/* 링 게이지 + % */}
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <div className="font-mono text-xl font-bold" style={{ color: 'var(--purple)' }}>{totalPct}%</div>
+              <div className="text-[11px]" style={{ color: 'var(--text3)' }}>{done} / {total}</div>
+            </div>
+            <div className="relative w-12 h-12">
+              <svg width="48" height="48" viewBox="0 0 48 48" className="absolute inset-0">
+                <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="3.5"/>
+                <circle cx="24" cy="24" r="20" fill="none" stroke="var(--purple)" strokeWidth="3.5"
+                  strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={offset}
+                  transform="rotate(-90 24 24)" style={{ transition: 'stroke-dashoffset 0.4s ease' }}/>
+              </svg>
+            </div>
+            <button onClick={() => signOut({ callbackUrl: '/' })} className="text-xs px-2.5 py-1.5 rounded-lg cursor-pointer" style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text3)' }}>
               로그아웃
             </button>
           </div>
         </div>
 
+        {/* 섹션별 미니 진행률 바 */}
+        <div className="flex px-4 pb-2 gap-2">
+          {sections.map(s => {
+            const items = s.cards.flatMap(c => c.items)
+            const pct = items.length ? Math.round(items.filter(i => i.done).length / items.length * 100) : 0
+            return (
+              <div key={s.id} className="flex-1">
+                <div className="text-[9px] mb-0.5 flex justify-between" style={{ color: 'var(--text3)' }}>
+                  <span>{s.name}</span><span>{pct}%</span>
+                </div>
+                <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--border2)' }}>
+                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: s.color }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </header>
+
+      {/* ── 메인 콘텐츠 ── */}
+      <main className="flex-1 w-full max-w-2xl mx-auto px-4 py-4">
         <TimeScrub />
 
         {sections.map(section => (
           <div key={section.id}>
-            <div className="flex items-center gap-2.5 mt-7 mb-3">
-              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: section.color }} />
-              <div className="text-xs font-semibold tracking-[0.08em] uppercase" style={{ color: 'var(--text3)' }}>
-                {section.name}
-              </div>
+            <div className="flex items-center gap-2 mt-6 mb-2">
+              <div className="w-2 h-2 rounded-full" style={{ background: section.color }} />
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text3)' }}>{section.name}</span>
               <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
             </div>
             {section.cards.map(card => (
@@ -194,49 +202,44 @@ export default function DashboardPage() {
             ))}
           </div>
         ))}
-
-        {/* 하단 여백 (fixed bar 높이만큼) */}
-        <div className="h-6" />
       </main>
 
-      {/* ── 항상 보이는 저장 바 (fixed bottom) ── */}
+      {/* ── 저장 바 (바텀 탭 위에 고정) ── */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between px-6 py-3"
+        className="fixed left-0 right-0 z-40 flex items-center gap-3 px-4"
         style={{
-          background: 'rgba(15,15,17,0.92)',
+          bottom: 'var(--nav-h)',
+          height: 'var(--bar-h)',
+          background: 'rgba(15,15,17,0.97)',
           borderTop: '1px solid var(--border2)',
-          backdropFilter: 'blur(12px)',
+          backdropFilter: 'blur(20px)',
         }}
       >
-        {/* 진행률 텍스트 */}
-        <div className="flex items-center gap-3">
-          <div className="font-mono text-xl font-medium" style={{ color: 'var(--purple)' }}>
-            {totalPct}%
-          </div>
-          <div className="text-xs" style={{ color: 'var(--text3)' }}>
-            {doneCount} / {allItems.length} 완료
-            {incompleteItems.length > 0 && (
-              <span className="ml-2" style={{ color: 'var(--text3)' }}>
-                · 미완료 {incompleteItems.length}개
-              </span>
-            )}
-          </div>
-        </div>
+        {/* 리셋 버튼 */}
+        <button
+          onClick={() => { if (confirm('체크를 초기화할까요?')) doReset() }}
+          className="flex items-center justify-center w-12 h-12 rounded-xl cursor-pointer transition-all shrink-0"
+          style={{ background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text3)' }}
+          onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--red)'; e.currentTarget.style.color = 'var(--red)' }}
+          onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.color = 'var(--text3)' }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+          </svg>
+        </button>
 
         {/* 저장 버튼 */}
         <button
-          onClick={() => saveToCloud(sections, false)}
+          onClick={() => doSave(sections)}
           disabled={saving}
-          className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold cursor-pointer disabled:opacity-50 transition-all"
-          style={{ background: 'var(--purple)', border: 'none', color: '#fff', minWidth: 140 }}
+          className="flex-1 h-12 flex items-center justify-center gap-2 rounded-xl text-base font-bold cursor-pointer disabled:opacity-50 transition-all"
+          style={{ background: 'var(--purple)', border: 'none', color: '#fff' }}
           onMouseOver={e => !saving && (e.currentTarget.style.background = '#6a5ee0')}
           onMouseOut={e => (e.currentTarget.style.background = 'var(--purple)')}
         >
-          {saving ? (
-            <span>저장 중...</span>
-          ) : (
+          {saving ? '저장 중...' : (
             <>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
                 <polyline points="17 21 17 13 7 13 7 21"/>
                 <polyline points="7 3 7 8 15 8"/>
@@ -247,11 +250,13 @@ export default function DashboardPage() {
         </button>
       </div>
 
+      <BottomNav />
+
       {/* 토스트 */}
       {toast && (
         <div
-          className="fixed bottom-20 right-6 px-4 py-2.5 rounded-lg text-sm z-50"
-          style={{ background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)' }}
+          className="fixed left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl text-sm font-medium whitespace-nowrap"
+          style={{ bottom: 'calc(var(--nav-h) + var(--bar-h) + 12px)', background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)' }}
         >
           {toast}
         </div>

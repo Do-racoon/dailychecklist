@@ -6,6 +6,7 @@ import { CheckSection } from '@/types'
 import { parseMarkdownToSections } from '@/lib/parseMarkdown'
 import { CHECKLIST_PROMPT, ANNUAL_GOAL_PROMPT } from '@/lib/promptTemplate'
 import CheckCard from '@/components/CheckCard'
+import BottomNav from '@/components/BottomNav'
 
 const STORAGE_KEY = 'daily_checklist_v2'
 const DATE_KEY = 'daily_checklist_date'
@@ -58,8 +59,17 @@ function ImportContent() {
   const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
-      <div className="max-w-2xl mx-auto px-6 py-10">
+    <div className="min-h-screen w-full" style={{ background: 'var(--bg)', paddingBottom: isOnboarding ? 24 : 'calc(var(--nav-h) + 24px)' }}>
+
+      {/* 상단 헤더 */}
+      {!isOnboarding && (
+        <header className="sticky top-0 z-30 flex items-center px-4 py-4"
+          style={{ background: 'rgba(15,15,17,0.95)', backdropFilter: 'blur(16px)', borderBottom: '1px solid var(--border)' }}>
+          <div className="text-base font-semibold" style={{ color: 'var(--text)' }}>🤖 AI 임포트</div>
+        </header>
+      )}
+
+      <div className="max-w-2xl mx-auto px-4 py-6">
 
         {/* 헤더 */}
         {isOnboarding ? (
@@ -294,6 +304,8 @@ function ImportContent() {
           </div>
         )}
       </div>
+
+      {!isOnboarding && <BottomNav />}
     </div>
   )
 }

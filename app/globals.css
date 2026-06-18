@@ -23,12 +23,16 @@
   --pink-dim: rgba(224,107,154,0.12);
   --red: #e05555;
   --green: #3ecfae;
+  --nav-h: 64px;
+  --bar-h: 72px;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -37,7 +41,7 @@ body {
   font-family: 'Noto Sans KR', sans-serif;
   font-size: 14px;
   line-height: 1.6;
-  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 input[type=range] {
@@ -49,11 +53,9 @@ input[type=range] {
   outline: none;
   cursor: pointer;
 }
-
 input[type=range]::-webkit-slider-thumb {
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 16px; height: 16px;
   border-radius: 50%;
   background: var(--purple);
   cursor: pointer;
@@ -63,7 +65,7 @@ input[type=range]::-webkit-slider-thumb {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
+.animate-pulse-dot { animation: pulse-dot 2s infinite; }
 
-.animate-pulse-dot {
-  animation: pulse-dot 2s infinite;
-}
+/* 스크롤바 숨기기 */
+::-webkit-scrollbar { width: 0; height: 0; }

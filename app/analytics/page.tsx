@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { DailyRecord } from '@/types'
 import CompletionChart from '@/components/CompletionChart'
 import AnalyticsCard, { Recommendation } from '@/components/AnalyticsCard'
+import BottomNav from '@/components/BottomNav'
 
 const DIFFICULTY_LEVELS = [
   { level: 1, label: '너무 많아요',   emoji: '😵', color: '#e05555', action: '항목을 절반으로 줄이거나, AI 임포트로 루틴을 다시 만들어보세요.' },
@@ -101,22 +102,18 @@ export default function AnalyticsPage() {
   const recs = buildRecs(records, avg7)
 
   return (
-    <div className="min-h-screen pb-12" style={{ background: 'var(--bg)' }}>
-      <div className="max-w-xl mx-auto px-5 py-8">
+    <div className="min-h-screen w-full" style={{ background: 'var(--bg)', paddingBottom: 'calc(var(--nav-h) + 24px)' }}>
 
-        {/* 헤더 */}
-        <div className="flex items-center justify-between mb-6">
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg cursor-pointer transition-all"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text2)' }}
-          >
-            ← 대시보드
-          </button>
-          <div className="font-mono text-xs" style={{ color: 'var(--text3)' }}>
-            올해 {dayOfYear}일째 · {daysLeft}일 남음
-          </div>
+      {/* 헤더 */}
+      <header className="sticky top-0 z-30 flex items-center justify-between px-4 py-4"
+        style={{ background: 'rgba(15,15,17,0.95)', backdropFilter: 'blur(16px)', borderBottom: '1px solid var(--border)' }}>
+        <div className="text-base font-semibold" style={{ color: 'var(--text)' }}>📊 기록 & 분석</div>
+        <div className="font-mono text-xs" style={{ color: 'var(--text3)' }}>
+          올해 {dayOfYear}일째 · {daysLeft}일 남음
         </div>
+      </header>
+
+      <div className="max-w-2xl mx-auto px-4 py-5">
 
         {/* ① 지금 나는 어디쯤? — 핵심 카드 */}
         <div
@@ -276,6 +273,8 @@ export default function AnalyticsPage() {
         </button>
 
       </div>
+
+      <BottomNav />
     </div>
   )
 }

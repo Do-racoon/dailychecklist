@@ -25,7 +25,7 @@ export default function CheckItem({ item, sectionColor, onToggle }: Props) {
   return (
     <div
       onClick={() => onToggle(item.id)}
-      className="flex items-start gap-3 px-4 py-[11px] cursor-pointer select-none transition-colors border-b last:border-b-0"
+      className="flex items-start gap-3 px-4 py-3.5 cursor-pointer select-none transition-colors border-b last:border-b-0"
       style={{
         borderColor: 'var(--border)',
         background: 'transparent',
@@ -36,7 +36,7 @@ export default function CheckItem({ item, sectionColor, onToggle }: Props) {
     >
       {/* 체크박스 */}
       <div
-        className="w-4 h-4 shrink-0 mt-[2px] rounded flex items-center justify-center transition-all"
+        className="w-5 h-5 shrink-0 mt-[1px] rounded-md flex items-center justify-center transition-all"
         style={{
           border: item.done ? 'none' : '1.5px solid var(--border2)',
           background: item.done ? 'var(--purple)' : 'transparent',
