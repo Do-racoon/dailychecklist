@@ -46,16 +46,13 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false)
   const sectionsRef = useRef(sections)
 
-  // 첫 로그인 온보딩 체크
   useEffect(() => {
     if (status !== 'authenticated') return
-    const onboarded = localStorage.getItem(ONBOARDED_KEY)
-    if (!onboarded) {
+    if (!localStorage.getItem(ONBOARDED_KEY)) {
       router.push('/import?onboarding=1')
     }
   }, [status, router])
 
-  // 로컬스토리지 로드
   useEffect(() => {
     const savedDate = localStorage.getItem(DATE_KEY)
     const today = todayKey()
@@ -68,42 +65,36 @@ export default function DashboardPage() {
     }
   }, [])
 
-  // sectionsRef 동기화 (자정 타이머에서 최신값 접근)
-  useEffect(() => {
-    sectionsRef.current = sections
-  }, [sections])
+  useEffect(() => { sectionsRef.current = sections }, [sections])
 
-  // 자정 자동 저장 + 리셋
   useEffect(() => {
     const now = new Date()
     const midnight = new Date(now)
     midnight.setHours(24, 0, 0, 0)
-    const ms = midnight.getTime() - now.getTime()
     const t = setTimeout(async () => {
       await saveToCloud(sectionsRef.current, true)
       resetChecklist(true)
-    }, ms)
+    }, midnight.getTime() - now.getTime())
     return () => clearTimeout(t)
   }, [])
 
-  const saveLocal = useCallback((newSections: CheckSection[]) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newSections))
+  const saveLocal = useCallback((s: CheckSection[]) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
     localStorage.setItem(DATE_KEY, todayKey())
   }, [])
 
-  async function saveToCloud(currentSections: CheckSection[], auto = false) {
+  async function saveToCloud(cur: CheckSection[], auto = false) {
     if (!session?.user) return
-    const { totalPct, sectionPcts, incompleteItems } = calcStats(currentSections)
+    const stats = calcStats(cur)
     setSaving(true)
     try {
       await fetch('/api/records', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: todayKey(), totalPct, sectionPcts, incompleteItems }),
+        body: JSON.stringify({ date: todayKey(), ...stats }),
       })
       if (!auto) {
-        showToast(`✅ 저장 완료! 오늘 달성률 ${totalPct}%`)
-        // 저장 후 리셋
+        showToast(`✅ 저장 완료! 오늘 달성률 ${stats.totalPct}%`)
         setTimeout(() => resetChecklist(true), 1500)
       }
     } catch {
@@ -114,14 +105,12 @@ export default function DashboardPage() {
   }
 
   function resetChecklist(auto = false) {
-    const fresh = deepClone(DEFAULT_SECTIONS)
-    // 커스텀 섹션이 있으면 유지 (done만 초기화)
-    const customSections = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') as CheckSection[] | null
-    const resetSections = customSections
-      ? customSections.map(s => ({ ...s, cards: s.cards.map(c => ({ ...c, items: c.items.map(i => ({ ...i, done: false })) })) }))
-      : fresh
-    setSections(resetSections)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(resetSections))
+    const cur = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') as CheckSection[] | null
+    const fresh = cur
+      ? cur.map(s => ({ ...s, cards: s.cards.map(c => ({ ...c, items: c.items.map(i => ({ ...i, done: false })) })) }))
+      : deepClone(DEFAULT_SECTIONS)
+    setSections(fresh)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh))
     localStorage.setItem(DATE_KEY, todayKey())
     if (auto) showToast('🌅 새로운 하루! 체크리스트가 초기화됐어요.')
   }
@@ -129,61 +118,60 @@ export default function DashboardPage() {
   const handleToggle = useCallback((itemId: string) => {
     setSections(prev => {
       const next = deepClone(prev)
-      for (const section of next) {
-        for (const card of section.cards) {
-          const item = card.items.find(i => i.id === itemId)
-          if (item) { item.done = !item.done; break }
-        }
+      for (const s of next) for (const c of s.cards) {
+        const item = c.items.find(i => i.id === itemId)
+        if (item) { item.done = !item.done; break }
       }
       saveLocal(next)
       return next
     })
   }, [saveLocal])
 
-  function handleManualReset() {
-    if (!confirm('체크를 모두 초기화할까요?')) return
-    resetChecklist(false)
-    showToast('초기화됐어요.')
-  }
-
   function showToast(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(''), 3000)
   }
 
-  return (
-    <div className="flex min-h-screen">
-      <Sidebar sections={sections} onReset={handleManualReset} />
+  const { totalPct, incompleteItems } = calcStats(sections)
+  const allItems = sections.flatMap(s => s.cards.flatMap(c => c.items))
+  const doneCount = allItems.filter(i => i.done).length
 
-      <main className="flex-1 px-10 py-8 max-w-3xl">
-        {/* 상단 */}
-        <div className="flex justify-between items-center mb-6">
+  return (
+    <div className="flex min-h-screen" style={{ paddingBottom: 80 }}>
+      <Sidebar sections={sections} onReset={() => { if (confirm('체크를 모두 초기화할까요?')) { resetChecklist(false); showToast('초기화됐어요.') } }} />
+
+      <main className="flex-1 px-8 py-6 max-w-3xl">
+
+        {/* 상단 네비게이션 */}
+        <div className="flex justify-between items-center mb-5">
           <div className="text-sm" style={{ color: 'var(--text2)' }}>
-            안녕하세요, <span style={{ color: 'var(--text)' }}>{session?.user?.name}</span>님
+            {session?.user?.name}님의 오늘
           </div>
           <div className="flex items-center gap-2">
+            {/* AI 임포트 */}
             <button
               onClick={() => router.push('/import')}
-              className="text-xs px-3 py-1.5 rounded-md cursor-pointer transition-all"
-              style={{ border: '1px solid var(--border2)', color: 'var(--text3)', background: 'none' }}
-              onMouseOver={e => e.currentTarget.style.color = 'var(--purple)'}
-              onMouseOut={e => e.currentTarget.style.color = 'var(--text3)'}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all"
+              style={{ background: 'var(--purple-dim)', border: '1px solid var(--purple)', color: 'var(--purple)' }}
+              onMouseOver={e => e.currentTarget.style.background = 'var(--purple-bg)'}
+              onMouseOut={e => e.currentTarget.style.background = 'var(--purple-dim)'}
             >
-              🤖 AI 임포트
+              <span>🤖</span> AI 임포트
             </button>
+            {/* 기록 */}
             <button
               onClick={() => router.push('/analytics')}
-              className="text-xs px-3 py-1.5 rounded-md cursor-pointer transition-all"
-              style={{ border: '1px solid var(--border2)', color: 'var(--text3)', background: 'none' }}
-              onMouseOver={e => e.currentTarget.style.color = 'var(--teal)'}
-              onMouseOut={e => e.currentTarget.style.color = 'var(--text3)'}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border2)', color: 'var(--text2)' }}
+              onMouseOver={e => { e.currentTarget.style.borderColor = 'var(--teal)'; e.currentTarget.style.color = 'var(--teal)' }}
+              onMouseOut={e => { e.currentTarget.style.borderColor = 'var(--border2)'; e.currentTarget.style.color = 'var(--text2)' }}
             >
-              📊 기록
+              <span>📊</span> 기록
             </button>
             <button
               onClick={() => signOut({ callbackUrl: '/' })}
-              className="text-xs px-3 py-1.5 rounded-md cursor-pointer"
-              style={{ border: '1px solid var(--border2)', color: 'var(--text3)', background: 'none' }}
+              className="px-3 py-2 rounded-lg text-sm cursor-pointer"
+              style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text3)' }}
             >
               로그아웃
             </button>
@@ -195,8 +183,8 @@ export default function DashboardPage() {
         {sections.map(section => (
           <div key={section.id}>
             <div className="flex items-center gap-2.5 mt-7 mb-3">
-              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: section.color }} />
-              <div className="text-[11px] font-semibold tracking-[0.08em] uppercase" style={{ color: 'var(--text3)' }}>
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: section.color }} />
+              <div className="text-xs font-semibold tracking-[0.08em] uppercase" style={{ color: 'var(--text3)' }}>
                 {section.name}
               </div>
               <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
@@ -207,31 +195,62 @@ export default function DashboardPage() {
           </div>
         ))}
 
-        <div className="flex gap-2.5 mt-8 pt-6 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button
-            onClick={() => saveToCloud(sections, false)}
-            disabled={saving}
-            className="flex items-center gap-1.5 px-5 py-2.5 rounded-md text-[13px] font-medium cursor-pointer disabled:opacity-50 transition-all"
-            style={{ background: 'var(--purple)', border: 'none', color: '#fff' }}
-            onMouseOver={e => !saving && (e.currentTarget.style.background = '#6a5ee0')}
-            onMouseOut={e => (e.currentTarget.style.background = 'var(--purple)')}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-              <polyline points="17 21 17 13 7 13 7 21"/>
-              <polyline points="7 3 7 8 15 8"/>
-            </svg>
-            {saving ? '저장 중...' : '오늘 기록 저장'}
-          </button>
-          <div className="text-[11px] flex items-center" style={{ color: 'var(--text3)' }}>
-            저장하면 체크가 초기화돼요
-          </div>
-        </div>
+        {/* 하단 여백 (fixed bar 높이만큼) */}
+        <div className="h-6" />
       </main>
 
+      {/* ── 항상 보이는 저장 바 (fixed bottom) ── */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-between px-6 py-3"
+        style={{
+          background: 'rgba(15,15,17,0.92)',
+          borderTop: '1px solid var(--border2)',
+          backdropFilter: 'blur(12px)',
+        }}
+      >
+        {/* 진행률 텍스트 */}
+        <div className="flex items-center gap-3">
+          <div className="font-mono text-xl font-medium" style={{ color: 'var(--purple)' }}>
+            {totalPct}%
+          </div>
+          <div className="text-xs" style={{ color: 'var(--text3)' }}>
+            {doneCount} / {allItems.length} 완료
+            {incompleteItems.length > 0 && (
+              <span className="ml-2" style={{ color: 'var(--text3)' }}>
+                · 미완료 {incompleteItems.length}개
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* 저장 버튼 */}
+        <button
+          onClick={() => saveToCloud(sections, false)}
+          disabled={saving}
+          className="flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold cursor-pointer disabled:opacity-50 transition-all"
+          style={{ background: 'var(--purple)', border: 'none', color: '#fff', minWidth: 140 }}
+          onMouseOver={e => !saving && (e.currentTarget.style.background = '#6a5ee0')}
+          onMouseOut={e => (e.currentTarget.style.background = 'var(--purple)')}
+        >
+          {saving ? (
+            <span>저장 중...</span>
+          ) : (
+            <>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                <polyline points="17 21 17 13 7 13 7 21"/>
+                <polyline points="7 3 7 8 15 8"/>
+              </svg>
+              오늘 기록 저장
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* 토스트 */}
       {toast && (
         <div
-          className="fixed bottom-7 right-7 px-4 py-2.5 rounded-md text-[13px] z-50"
+          className="fixed bottom-20 right-6 px-4 py-2.5 rounded-lg text-sm z-50"
           style={{ background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)' }}
         >
           {toast}
